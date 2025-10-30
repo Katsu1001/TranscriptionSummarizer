@@ -36,7 +36,32 @@ pip install -r requirements.txt
 
 ## 使い方
 
-### 方法1: フォルダ監視モード（おすすめ！）⭐️
+### 方法1: 統合版 自動文字起こしシステム（おすすめ！）⭐️ NEW!
+
+**単一ファイルで完結する自動文字起こしシステムです。**
+
+1. プログラムを起動
+
+```bash
+python transcribe_auto.py
+```
+
+2. `input`フォルダに.m4aファイルをドラッグ＆ドロップ
+
+3. 自動的に文字起こしが開始され、`output`フォルダに結果が保存されます
+
+4. 停止するには `Ctrl+C` を押す
+
+**メリット:**
+- 単一ファイルで全機能を実現（依存関係なし）
+- ファイルを追加するだけで自動処理
+- ずっと動かしておける
+- 複数のファイルを順番に処理できる
+- 詳細な日本語コメント付きで理解しやすい
+
+---
+
+### 方法2: フォルダ監視モード（従来版）
 
 **新しいファイルが追加されたら自動的に文字起こしを開始します。**
 
@@ -59,7 +84,7 @@ python monitor.py
 
 ---
 
-### 方法2: バッチ処理モード（従来の方法）
+### 方法3: バッチ処理モード（従来の方法）
 
 **inputフォルダにあるすべての.m4aファイルを一度に処理します。**
 
@@ -85,7 +110,19 @@ python transcribe.py
 
 精度と速度のバランスを調整できます：
 
-**フォルダ監視モード:**
+**統合版 自動文字起こしシステム:**
+```bash
+# より速く処理（精度は少し落ちる）
+python transcribe_auto.py --model tiny
+
+# 標準（デフォルト）
+python transcribe_auto.py --model base
+
+# より高精度（処理時間は長くなる）
+python transcribe_auto.py --model medium
+```
+
+**フォルダ監視モード（従来版）:**
 ```bash
 # より速く処理（精度は少し落ちる）
 python monitor.py --model tiny
@@ -120,7 +157,16 @@ python transcribe.py --model medium
 
 デフォルトは日本語ですが、他の言語も指定できます：
 
-**フォルダ監視モード:**
+**統合版 自動文字起こしシステム:**
+```bash
+# 英語
+python transcribe_auto.py --language en
+
+# 中国語
+python transcribe_auto.py --language zh
+```
+
+**フォルダ監視モード（従来版）:**
 ```bash
 # 英語
 python monitor.py --language en
@@ -144,7 +190,8 @@ python transcribe.py --language zh
 TranscriptionSummarizer/
 ├── input/              # ここに.m4aファイルを配置
 ├── output/             # 文字起こし結果が保存される
-├── monitor.py          # フォルダ監視スクリプト（NEW!）⭐️
+├── transcribe_auto.py  # 統合版 自動文字起こしシステム（NEW!）⭐️
+├── monitor.py          # フォルダ監視スクリプト（従来版）
 ├── transcribe.py       # バッチ処理スクリプト
 ├── requirements.txt    # 必要なライブラリ
 └── README.md          # このファイル
