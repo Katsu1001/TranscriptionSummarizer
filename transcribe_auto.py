@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Whisper自動文字起こしシステム
+Whisper自動文字起こしシステム（改善版）
 
 【このプログラムの役割】
 inputフォルダを監視して、新しい.m4aファイルが追加されたら自動的に文字起こしします。
@@ -12,12 +12,21 @@ MacBook Pro M4で高速に動作するように最適化されています。
 - 重複処理防止
 - ファイル転送完了待機（AirDropやコピー中の問題に対応）
 - 詳細なエラーハンドリング
+- 【NEW!】音声前処理機能（ノイズ除去・音量正規化）
+- 【NEW!】専門用語指定機能（initial_prompt）
+- 【NEW!】精度調整機能（temperature）
 
 【使い方】
 1. python transcribe_auto.py を実行
 2. input/ フォルダに .m4a ファイルを追加
 3. 自動的に文字起こしが開始され、output/ フォルダに結果が保存される
 4. 停止するには Ctrl+C を押す
+
+【精度向上オプション】
+- --model medium: より高精度なモデルを使用
+- --preprocess: 音声前処理（ノイズ除去・音量正規化）を有効化
+- --initial-prompt "専門用語1 専門用語2": 専門用語や文脈を指定
+- --temperature 0.0: より確実な文字起こし（0.0-1.0、デフォルト0.0）
 """
 
 # ============================================================
@@ -37,6 +46,7 @@ import whisper
 
 # 音声ファイルの分割・変換
 from pydub import AudioSegment
+from pydub.effects import normalize  # 音量正規化
 
 # AI計算用ライブラリ（PyTorch）
 import torch
@@ -44,6 +54,18 @@ import torch
 # フォルダ監視用ライブラリ（Watchdog）
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+# 音声処理・ノイズ除去用ライブラリ
+import numpy as np
+
+# ノイズ除去ライブラリ（オプション）
+try:
+    import noisereduce as nr
+    NOISEREDUCE_AVAILABLE = True
+except ImportError:
+    NOISEREDUCE_AVAILABLE = False
+    print("⚠️  noisereduceライブラリが見つかりません。")
+    print("   音声前処理機能を使うには: pip install noisereduce")
 
 
 # ============================================================
@@ -74,7 +96,85 @@ def setup_directories():
     Path(OUTPUT_DIR).mkdir(exist_ok=True)  # outputフォルダを作成
 
 
-def convert_audio_to_chunks(audio_path, chunk_length_ms=CHUNK_LENGTH_MS):
+def preprocess_audio(audio):
+    """
+    音声データの前処理を行う関数（精度向上のため）
+
+    【やること】
+    1. 音量正規化 - 音量を適切なレベルに調整
+    2. ノイズ除去 - 背景ノイズを減らしてクリアな音声にする
+
+    【なぜ必要？】
+    - 音量が小さすぎる/大きすぎると認識精度が下がる
+    - 背景ノイズがあると、音声認識AIが混乱する
+    - 前処理により、AIが音声に集中しやすくなる
+
+    【引数】
+        audio: AudioSegment オブジェクト（音声データ）
+
+    【戻り値】
+        前処理済みの AudioSegment オブジェクト
+    """
+    print("      🔧 音声前処理を実行中...")
+
+    # ============================================================
+    # 1. 音量正規化（normalize）
+    # ============================================================
+    # 音量を適切なレベルに自動調整
+    # 小さすぎる音声は大きく、大きすぎる音声は適度に調整される
+    print("         - 音量正規化中...")
+    audio = normalize(audio)
+
+    # ============================================================
+    # 2. ノイズ除去（noisereduce使用）
+    # ============================================================
+    if NOISEREDUCE_AVAILABLE:
+        print("         - ノイズ除去中...")
+
+        # AudioSegmentをNumPy配列に変換（noisereduceが要求する形式）
+        samples = np.array(audio.get_array_of_samples())
+
+        # ステレオ（2チャンネル）の場合、モノラル（1チャンネル）に変換
+        if audio.channels == 2:
+            # ステレオ → モノラル変換
+            # [L, R, L, R, ...] → [(L+R)/2, (L+R)/2, ...]
+            samples = samples.reshape((-1, 2))  # [L, R]のペアに整形
+            samples = samples.mean(axis=1)      # 平均を取ってモノラルに
+
+        # float型に変換（noisereduceの要求形式）
+        samples = samples.astype(np.float32)
+
+        # サンプリングレート（1秒あたりのサンプル数）を取得
+        sample_rate = audio.frame_rate
+
+        # ノイズ除去を実行
+        # stationary=True → 定常的なノイズ（エアコン音など）を除去
+        reduced_noise = nr.reduce_noise(
+            y=samples,
+            sr=sample_rate,
+            stationary=True
+        )
+
+        # NumPy配列をAudioSegmentに戻す
+        # int16型に変換（音声データの標準形式）
+        reduced_noise = reduced_noise.astype(np.int16)
+
+        # AudioSegmentを再構築
+        audio = AudioSegment(
+            reduced_noise.tobytes(),          # バイト列に変換
+            frame_rate=sample_rate,           # サンプリングレート
+            sample_width=2,                   # 16bit = 2bytes
+            channels=1                        # モノラル
+        )
+
+        print("         ✅ 前処理完了")
+    else:
+        print("         ⚠️  ノイズ除去はスキップ（noisereduceが未インストール）")
+
+    return audio
+
+
+def convert_audio_to_chunks(audio_path, chunk_length_ms=CHUNK_LENGTH_MS, preprocess=False):
     """
     音声ファイルを小さな塊（チャンク）に分割する関数
 
@@ -86,6 +186,7 @@ def convert_audio_to_chunks(audio_path, chunk_length_ms=CHUNK_LENGTH_MS):
         audio_path: 音声ファイルのパス（例: input/meeting.m4a）
         chunk_length_ms: 1つのチャンクの長さ（ミリ秒）
                         デフォルトは10分 = 600,000ミリ秒
+        preprocess: 音声前処理（ノイズ除去・音量正規化）を行うかどうか
 
     【戻り値】
         分割された音声データのリスト（例: [0-10分, 10-20分, 20-30分, ...]）
@@ -98,6 +199,12 @@ def convert_audio_to_chunks(audio_path, chunk_length_ms=CHUNK_LENGTH_MS):
     duration_ms = len(audio)            # ミリ秒単位で長さを取得
     duration_min = duration_ms / 1000 / 60  # 分に変換（÷1000で秒、÷60で分）
     print(f"   音声の長さ: {duration_min:.1f}分")
+
+    # ============================================================
+    # 音声前処理（オプション）
+    # ============================================================
+    if preprocess:
+        audio = preprocess_audio(audio)
 
     # ============================================================
     # 音声をチャンク（塊）に分割
@@ -116,15 +223,17 @@ def convert_audio_to_chunks(audio_path, chunk_length_ms=CHUNK_LENGTH_MS):
     return chunks
 
 
-def transcribe_audio(audio_path, model_name="base", language="ja"):
+def transcribe_audio(audio_path, model_name="base", language="ja",
+                     initial_prompt=None, temperature=0.0, preprocess=False):
     """
     音声ファイルを文字起こしする関数（このプログラムのメイン処理）
 
     【やること】
     1. AIモデル（Whisper）を読み込む
     2. 音声を10分ごとに分割
-    3. それぞれの塊を文字起こし
-    4. 全部つなげて返す
+    3. （オプション）音声前処理（ノイズ除去・音量正規化）
+    4. それぞれの塊を文字起こし
+    5. 全部つなげて返す
 
     【引数】
         audio_path: 音声ファイルのパス（例: input/lecture.m4a）
@@ -135,6 +244,12 @@ def transcribe_audio(audio_path, model_name="base", language="ja"):
                    - medium: 高精度だけど遅い
                    - large: 最高精度だけどとても遅い
         language: 言語コード（ja=日本語、en=英語）
+        initial_prompt: 専門用語や文脈のヒント（例: "AI 機械学習 ディープラーニング"）
+                       これを指定すると、Whisperがその用語を優先的に認識する
+        temperature: 推論の確信度（0.0-1.0）
+                    - 0.0: 最も確実な結果を選ぶ（推奨）
+                    - 1.0: より多様な結果を許容（創造的だが不正確な場合も）
+        preprocess: 音声前処理を行うかどうか（True=有効、False=無効）
 
     【戻り値】
         文字起こし結果のテキスト（全文）
@@ -165,10 +280,20 @@ def transcribe_audio(audio_path, model_name="base", language="ja"):
     model = whisper.load_model(model_name, device=device)
 
     # ============================================================
+    # 精度向上設定の表示
+    # ============================================================
+    if initial_prompt:
+        print(f"   📝 専門用語ヒント: {initial_prompt[:50]}{'...' if len(initial_prompt) > 50 else ''}")
+    if temperature != 0.0:
+        print(f"   🌡️  Temperature: {temperature}")
+    if preprocess:
+        print(f"   🔧 音声前処理: 有効")
+
+    # ============================================================
     # 音声をチャンク（塊）に分割
     # ============================================================
 
-    chunks = convert_audio_to_chunks(audio_path)
+    chunks = convert_audio_to_chunks(audio_path, preprocess=preprocess)
 
     # ============================================================
     # 一時ファイル用のフォルダを作成
@@ -200,11 +325,20 @@ def transcribe_audio(audio_path, model_name="base", language="ja"):
         # ------------------------------------------------------------
         # 2. Whisperで文字起こし実行
         # ------------------------------------------------------------
-        result = model.transcribe(
-            str(temp_file),      # 音声ファイルのパス
-            language=language,   # 言語（日本語なら "ja"）
-            verbose=False        # 詳細なログを表示しない
-        )
+        # transcribeメソッドのパラメータ設定
+        transcribe_params = {
+            "language": language,    # 言語（日本語なら "ja"）
+            "verbose": False,        # 詳細なログを表示しない
+            "temperature": temperature  # 推論の確信度
+        }
+
+        # initial_promptが指定されている場合のみ追加
+        # （空文字列を渡すとエラーになる場合があるため）
+        if initial_prompt:
+            transcribe_params["initial_prompt"] = initial_prompt
+
+        # 文字起こし実行
+        result = model.transcribe(str(temp_file), **transcribe_params)
 
         # 文字起こし結果を追加
         # result["text"] に文字起こしされたテキストが入っている
@@ -308,18 +442,25 @@ class AudioFileHandler(FileSystemEventHandler):
     このクラスは「新しいファイルが追加されたら文字起こしする」というレシピ。
     """
 
-    def __init__(self, model_name="base", language="ja"):
+    def __init__(self, model_name="base", language="ja",
+                 initial_prompt=None, temperature=0.0, preprocess=False):
         """
         初期設定（このクラスを使い始めるときに最初に実行される）
 
         引数（材料）:
             model_name: Whisperのモデル名（精度と速度のバランス）
             language: 言語（日本語は "ja"）
+            initial_prompt: 専門用語や文脈のヒント
+            temperature: 推論の確信度（0.0-1.0）
+            preprocess: 音声前処理を行うかどうか
         """
         super().__init__()  # 親クラスの初期化（おまじない）
-        self.model_name = model_name    # モデル名を保存
-        self.language = language        # 言語を保存
-        self.processing_files = set()   # 現在処理中のファイルを記録（重複防止）
+        self.model_name = model_name        # モデル名を保存
+        self.language = language            # 言語を保存
+        self.initial_prompt = initial_prompt  # 専門用語ヒントを保存
+        self.temperature = temperature      # temperature設定を保存
+        self.preprocess = preprocess        # 前処理設定を保存
+        self.processing_files = set()       # 現在処理中のファイルを記録（重複防止）
 
     def on_created(self, event):
         """
@@ -436,7 +577,10 @@ class AudioFileHandler(FileSystemEventHandler):
             transcription = transcribe_audio(
                 file_path,
                 model_name=self.model_name,
-                language=self.language
+                language=self.language,
+                initial_prompt=self.initial_prompt,
+                temperature=self.temperature,
+                preprocess=self.preprocess
             )
 
             # 結果をテキストファイルに保存
@@ -510,8 +654,12 @@ def main():
     # （プログラム実行時にオプションを指定できるようにする）
 
     parser = argparse.ArgumentParser(
-        description="🎤 Whisper自動文字起こしシステム\n"
-                    "inputフォルダを監視して、新しい.m4aファイルを自動的に文字起こしします",
+        description="🎤 Whisper自動文字起こしシステム（改善版）\n"
+                    "inputフォルダを監視して、新しい.m4aファイルを自動的に文字起こしします\n\n"
+                    "【精度向上機能】\n"
+                    "- 音声前処理（ノイズ除去・音量正規化）\n"
+                    "- 専門用語指定（initial_prompt）\n"
+                    "- 精度調整（temperature）",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -540,6 +688,34 @@ def main():
              "など"
     )
 
+    # --initial-prompt オプション（NEW! 専門用語や文脈を指定）
+    parser.add_argument(
+        "--initial-prompt",
+        type=str,
+        default=None,
+        help="専門用語や文脈のヒント（精度向上）\n"
+             "例: --initial-prompt \"AI 機械学習 ディープラーニング\"\n"
+             "Whisperがこれらの用語を優先的に認識します"
+    )
+
+    # --temperature オプション（NEW! 精度調整）
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="推論の確信度 (0.0-1.0, デフォルト: 0.0)\n"
+             "0.0: 最も確実な結果を選ぶ（推奨）\n"
+             "1.0: より多様な結果を許容"
+    )
+
+    # --preprocess オプション（NEW! 音声前処理を有効化）
+    parser.add_argument(
+        "--preprocess",
+        action="store_true",
+        help="音声前処理を有効化（ノイズ除去・音量正規化）\n"
+             "精度が向上しますが、処理時間が少し長くなります"
+    )
+
     # コマンドライン引数を解析（読み込む）
     args = parser.parse_args()
 
@@ -557,12 +733,24 @@ def main():
     # 起動メッセージを表示
     print()
     print("=" * 70)
-    print("🎤 Whisper自動文字起こしシステムを起動しました")
+    print("🎤 Whisper自動文字起こしシステム（改善版）を起動しました")
     print("=" * 70)
     print(f"📁 監視フォルダ: {input_abs_path}")
     print(f"📝 出力フォルダ: {output_abs_path}")
     print(f"🤖 使用モデル: {args.model}")
     print(f"🌏 言語: {args.language}")
+
+    # 精度向上機能の表示
+    if args.initial_prompt:
+        print(f"📝 専門用語ヒント: {args.initial_prompt}")
+    if args.temperature != 0.0:
+        print(f"🌡️  Temperature: {args.temperature}")
+    if args.preprocess:
+        print(f"🔧 音声前処理: 有効")
+        if not NOISEREDUCE_AVAILABLE:
+            print(f"   ⚠️  noisereduceが未インストール（ノイズ除去は無効）")
+            print(f"   インストール: pip install noisereduce")
+
     print()
     print("💡 使い方:")
     print(f"   1. {INPUT_DIR}/ フォルダに .m4a ファイルを追加してください")
@@ -583,7 +771,10 @@ def main():
     # イベントハンドラー（ファイル追加を検知する係）を作成
     event_handler = AudioFileHandler(
         model_name=args.model,
-        language=args.language
+        language=args.language,
+        initial_prompt=args.initial_prompt,
+        temperature=args.temperature,
+        preprocess=args.preprocess
     )
 
     # オブザーバー（フォルダを監視する係）を作成

@@ -10,7 +10,10 @@ MacBook Pro M4で.m4aファイル（iPhoneのボイスメモ）をOpenAI Whisper
 - M4チップ（MPS）で高速処理
 - 自動的に音声をチャンクに分割して処理
 - 処理結果をテキストファイルで保存
-- **NEW!** フォルダ監視機能（新しいファイルが追加されたら自動的に文字起こし）
+- フォルダ監視機能（新しいファイルが追加されたら自動的に文字起こし）
+- **NEW!** 音声前処理機能（ノイズ除去・音量正規化）で精度向上
+- **NEW!** 専門用語指定機能（initial_prompt）で業界用語を正確に認識
+- **NEW!** 精度調整機能（temperature）でより確実な文字起こし
 
 ## 必要要件
 
@@ -36,9 +39,11 @@ pip install -r requirements.txt
 
 ## 使い方
 
-### 方法1: 統合版 自動文字起こしシステム（おすすめ！）⭐️ NEW!
+### 方法1: 統合版 自動文字起こしシステム（おすすめ！）⭐️
 
-**単一ファイルで完結する自動文字起こしシステムです。**
+**単一ファイルで完結する自動文字起こしシステムです。精度向上機能付き！**
+
+#### 基本的な使い方
 
 1. プログラムを起動
 
@@ -52,12 +57,26 @@ python transcribe_auto.py
 
 4. 停止するには `Ctrl+C` を押す
 
+#### 精度を上げる使い方（推奨）
+
+```bash
+# より高精度なモデル + 音声前処理
+python transcribe_auto.py --model medium --preprocess
+
+# 専門用語を指定（医療・IT・ビジネスなど）
+python transcribe_auto.py --initial-prompt "AI 機械学習 ディープラーニング ニューラルネットワーク"
+
+# すべての精度向上機能を使用
+python transcribe_auto.py --model medium --preprocess --initial-prompt "専門用語1 専門用語2" --temperature 0.0
+```
+
 **メリット:**
 - 単一ファイルで全機能を実現（依存関係なし）
 - ファイルを追加するだけで自動処理
 - ずっと動かしておける
 - 複数のファイルを順番に処理できる
 - 詳細な日本語コメント付きで理解しやすい
+- 音声前処理やプロンプト指定で精度大幅向上
 
 ---
 
@@ -106,11 +125,12 @@ python transcribe.py
 
 ### オプション
 
-#### モデルサイズの指定
+#### 📊 精度向上オプション（transcribe_auto.py 専用）
 
-精度と速度のバランスを調整できます：
+**1. モデルサイズの指定**
 
-**統合版 自動文字起こしシステム:**
+精度と速度のバランスを調整：
+
 ```bash
 # より速く処理（精度は少し落ちる）
 python transcribe_auto.py --model tiny
@@ -118,8 +138,72 @@ python transcribe_auto.py --model tiny
 # 標準（デフォルト）
 python transcribe_auto.py --model base
 
-# より高精度（処理時間は長くなる）
+# より高精度（処理時間は長くなる）⭐️ おすすめ
 python transcribe_auto.py --model medium
+```
+
+**2. 音声前処理（--preprocess）**
+
+ノイズ除去と音量正規化で精度向上：
+
+```bash
+python transcribe_auto.py --preprocess
+```
+
+効果：
+- 背景ノイズ（エアコン、風切り音など）を除去
+- 音量を適切なレベルに自動調整
+- 音質が悪い録音でも認識精度が向上
+
+**3. 専門用語指定（--initial-prompt）**
+
+業界用語や固有名詞を正確に認識：
+
+```bash
+# 医療関係
+python transcribe_auto.py --initial-prompt "カルテ 患者 診断 処方箋 MRI CT"
+
+# IT関係
+python transcribe_auto.py --initial-prompt "API データベース クラウド サーバー アルゴリズム"
+
+# ビジネス
+python transcribe_auto.py --initial-prompt "売上 利益 マーケティング KPI ROI"
+```
+
+効果：
+- 専門用語の認識精度が大幅に向上
+- 固有名詞（人名・地名・商品名）を正確に認識
+- 業界特有の言い回しに対応
+
+**4. 精度調整（--temperature）**
+
+推論の確信度を調整：
+
+```bash
+# 最も確実な結果（デフォルト）⭐️ おすすめ
+python transcribe_auto.py --temperature 0.0
+
+# より多様な結果を許容（創造的だが不正確な場合も）
+python transcribe_auto.py --temperature 0.5
+```
+
+**5. 組み合わせ例（最高精度）**
+
+```bash
+python transcribe_auto.py \
+  --model medium \
+  --preprocess \
+  --initial-prompt "AI 機械学習 データサイエンス Python TensorFlow" \
+  --temperature 0.0
+```
+
+---
+
+#### 従来版オプション
+
+**統合版 自動文字起こしシステム:**
+```bash
+# 上記の精度向上オプションを参照
 ```
 
 **フォルダ監視モード（従来版）:**
@@ -240,6 +324,15 @@ TranscriptionSummarizer/
 
 - ffmpegがインストールされているか確認：`brew install ffmpeg`
 
+### エラー: "noisereduceライブラリが見つかりません"
+
+- 音声前処理機能（--preprocess）を使う場合は、noisereduceが必要です
+- インストール方法：
+  ```bash
+  pip install noisereduce
+  ```
+- noisereduceなしでも音量正規化は実行されます（ノイズ除去のみスキップされます）
+
 ### メモリ不足エラー
 
 - より小さいモデル（`tiny`や`base`）を使用してください
@@ -250,6 +343,29 @@ TranscriptionSummarizer/
 - 自動的にCPUモードに切り替わります
 - M1/M2/M3/M4チップでMacOS 12.3以降であればMPSが利用可能です
 
+### 精度が低い場合のヒント
+
+1. **より大きなモデルを使用**
+   ```bash
+   python transcribe_auto.py --model medium
+   ```
+
+2. **音声前処理を有効化**
+   ```bash
+   python transcribe_auto.py --preprocess
+   ```
+
+3. **専門用語を指定**
+   ```bash
+   python transcribe_auto.py --initial-prompt "よく出る専門用語や固有名詞"
+   ```
+
+4. **音声録音時の工夫**
+   - 静かな環境で録音
+   - マイクを口に近づける
+   - ゆっくり・はっきり話す
+   - 複数人が同時に話さないようにする
+
 ## ライセンス
 
 このプロジェクトはMITライセンスの下で公開されています。
@@ -258,3 +374,4 @@ TranscriptionSummarizer/
 
 - [OpenAI Whisper](https://github.com/openai/whisper) - 音声認識モデル
 - [PyDub](https://github.com/jiaaro/pydub) - 音声処理ライブラリ
+- [noisereduce](https://github.com/timsainb/noisereduce) - ノイズ除去ライブラリ

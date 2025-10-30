@@ -3,3 +3,5 @@ pydub
 torch
 torchaudio
 watchdog
+numpy
+noisereduce
