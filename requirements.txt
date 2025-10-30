@@ -2,3 +2,4 @@ openai-whisper
 pydub
 torch
 torchaudio
+watchdog

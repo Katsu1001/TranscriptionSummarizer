@@ -10,6 +10,7 @@ MacBook Pro M4で.m4aファイル（iPhoneのボイスメモ）をOpenAI Whisper
 - M4チップ（MPS）で高速処理
 - 自動的に音声をチャンクに分割して処理
 - 処理結果をテキストファイルで保存
+- **NEW!** フォルダ監視機能（新しいファイルが追加されたら自動的に文字起こし）
 
 ## 必要要件
 
@@ -35,7 +36,32 @@ pip install -r requirements.txt
 
 ## 使い方
 
-### 基本的な使い方
+### 方法1: フォルダ監視モード（おすすめ！）⭐️
+
+**新しいファイルが追加されたら自動的に文字起こしを開始します。**
+
+1. プログラムを起動
+
+```bash
+python monitor.py
+```
+
+2. `input`フォルダに.m4aファイルをドラッグ＆ドロップ
+
+3. 自動的に文字起こしが開始され、`output`フォルダに結果が保存されます
+
+4. 停止するには `Ctrl+C` を押す
+
+**メリット:**
+- ファイルを追加するだけで自動処理
+- ずっと動かしておける
+- 複数のファイルを順番に処理できる
+
+---
+
+### 方法2: バッチ処理モード（従来の方法）
+
+**inputフォルダにあるすべての.m4aファイルを一度に処理します。**
 
 1. `input`フォルダに.m4aファイルを配置
 
@@ -47,12 +73,31 @@ python transcribe.py
 
 3. `output`フォルダに文字起こし結果が保存されます
 
+**メリット:**
+- 一度に複数ファイルを処理
+- シンプルで分かりやすい
+
+---
+
 ### オプション
 
 #### モデルサイズの指定
 
 精度と速度のバランスを調整できます：
 
+**フォルダ監視モード:**
+```bash
+# より速く処理（精度は少し落ちる）
+python monitor.py --model tiny
+
+# 標準（デフォルト）
+python monitor.py --model base
+
+# より高精度（処理時間は長くなる）
+python monitor.py --model medium
+```
+
+**バッチ処理モード:**
 ```bash
 # より速く処理（精度は少し落ちる）
 python transcribe.py --model tiny
@@ -75,6 +120,16 @@ python transcribe.py --model medium
 
 デフォルトは日本語ですが、他の言語も指定できます：
 
+**フォルダ監視モード:**
+```bash
+# 英語
+python monitor.py --language en
+
+# 中国語
+python monitor.py --language zh
+```
+
+**バッチ処理モード:**
 ```bash
 # 英語
 python transcribe.py --language en
@@ -89,7 +144,8 @@ python transcribe.py --language zh
 TranscriptionSummarizer/
 ├── input/              # ここに.m4aファイルを配置
 ├── output/             # 文字起こし結果が保存される
-├── transcribe.py       # メインスクリプト
+├── monitor.py          # フォルダ監視スクリプト（NEW!）⭐️
+├── transcribe.py       # バッチ処理スクリプト
 ├── requirements.txt    # 必要なライブラリ
 └── README.md          # このファイル
 ```
